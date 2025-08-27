@@ -1,44 +1,113 @@
+require("dotenv").config();
+
 const express = require("express");
 const morgan = require("morgan");
 const cookieParser = require("cookie-parser");
 const path = require("path");
-const cors = require("cors"); //reasearsh team day 1
+const cors = require("cors");
+const mongoose = require("mongoose");
 
-const PORT = 5005;
+// Models
+const Cohort = require("./models/Cohort.model");
+const Student = require("./models/Student.model");
 
-// STATIC DATA
-// Devs Team - Import the provided files with JSON data of students and cohorts here:
-// ...
-const cohorts = require("./cohorts.json");
-const students = require("./students.json");
-
-// INITIALIZE EXPRESS APP - https://expressjs.com/en/4x/api.html#express
 const app = express();
+const PORT = process.env.PORT || 5005;
 
-// MIDDLEWARE
-// Research Team - Set up CORS middleware here:
-// ...
+// Middlewares
 app.use(cors({ origin: "http://localhost:5173" }));
-
-app.use(express.json());
 app.use(morgan("dev"));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
+app.use(express.static(path.join(__dirname, "public")));
 
-// ROUTES - https://expressjs.com/en/starter/basic-routing.html
-// Devs Team - Start working on the routes here:
-// ...
-app.get("/api/cohorts", (req, res) => res.json(cohorts));
-app.get("/api/students", (req, res) => res.json(students));
+// Routes
+app.get("/", (_req, res) => res.json({ status: "ok", docs: "/docs" }));
 
-app.get("/docs", (req, res) => {
+app.get("/docs", (_req, res) => {
   res.sendFile(path.join(__dirname, "views", "docs.html"));
 });
 
-// not found
-app.use((req, res) => res.status(404).json({ error: "Not found" }));
-// START SERVER
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+//  API: Cohorts
+app.get("/api/cohorts", async (_req, res, next) => {
+  try {
+    const list = await Cohort.find().lean();
+    res.json(list);
+  } catch (err) {
+    next(err);
+  }
 });
+
+// GET /api/cohorts/:id
+const { isValidObjectId } = mongoose;
+
+app.get("/api/cohorts/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id))
+      return res.status(400).json({ error: "Invalid id" });
+
+    const doc = await Cohort.findById(id).lean();
+    if (!doc) return res.status(404).json({ error: "Not found" });
+
+    res.json(doc);
+  } catch (err) {
+    next(err);
+  }
+});
+
+//API: Students
+app.get("/api/students", async (_req, res, next) => {
+  try {
+    const list = await Student.find()
+      .populate("cohort", "cohortName cohortSlug program format") // remova se não tiver ref
+      .lean();
+    res.json(list);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/students/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id))
+      return res.status(400).json({ error: "Invalid id" });
+
+    const doc = await Student.findById(id)
+      .populate("cohort", "cohortName cohortSlug program format")
+      .lean();
+    if (!doc) return res.status(404).json({ error: "Not found" });
+
+    res.json(doc);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Error handler
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: "Internal Server Error" });
+});
+
+// 404
+app.use((_req, res) => res.status(404).json({ error: "Not found" }));
+
+// mongo conection + start
+if (!process.env.MONGODB_URI) {
+  console.error("❌ Missing MONGODB_URI in .env");
+  process.exit(1);
+}
+
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log("MongoDB connected ✅");
+    app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+  })
+  .catch((err) => {
+    console.error("MongoDB connection error ❌", err.message);
+    process.exit(1);
+  });
